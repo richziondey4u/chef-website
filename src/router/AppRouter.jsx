@@ -1,16 +1,23 @@
 import { createBrowserRouter } from "react-router-dom";
 import RootLayout from "../components/layout/RootLayout";
+import ProtectedRoute from "../components/guards/ProtectedRoute";
+import AdminRoute from "../components/guards/ProtectedRoute";
 import Home from "../pages/Home";
-import Chef from "../pages/Chef";
+import Chefs from "../pages/Chef";
 import Menu from "../pages/Menu";
-import Events from "../pages/Events";
-import Contact from "../pages/Contact";
-import EventDetail from "../pages/EventDetail";
+import AdminDebug from "../pages/admin/AdminDebug";
 import MenuDetail from "../pages/MenuDetail";
+import Events from "../pages/Events";
+import EventDetail from "../pages/EventDetail";
+import Contact from "../pages/Contact";
 import AuthPage from "../pages/AuthPage";
 import Profile from "../pages/Profile";
-import Admin from "../pages/Admin";
 import NotFound from "../pages/NotFound";
+import AdminLayout from "../pages/admin/AdminLayout";
+import AdminDashboard from "../pages/admin/AdminDashboard";
+import AdminOrders from "../pages/admin/AdminOrders";
+import AdminMenu from "../pages/admin/AdminMenu";
+import AdminUsers from "../pages/admin/AdminUsers";
 
 export const router = createBrowserRouter([
   {
@@ -18,16 +25,38 @@ export const router = createBrowserRouter([
     element: <RootLayout />,
     children: [
       { index: true, element: <Home /> },
-      { path: "chefs", element: <Chef /> },
+      { path: "chefs", element: <Chefs /> },
       { path: "menu", element: <Menu /> },
-      { path: "events", element: <Events /> },
-      { path: "contact", element: <Contact /> },
-      { path: "events/:service", element: <EventDetail /> },
       { path: "menu/:id", element: <MenuDetail /> },
+      { path: "events", element: <Events /> },
+      { path: "events/:service", element: <EventDetail /> },
+      { path: "contact", element: <Contact /> },
       { path: "auth", element: <AuthPage /> },
-      { path: "profile", element: <Profile /> },
-      { path: "admin", element: <Admin /> },
-      { path: "*", element: <NotFound /> },
+      {
+        path: "profile",
+        element: (
+          <ProtectedRoute>
+            <Profile />
+          </ProtectedRoute>
+        ),
+      },
     ],
   },
+  // Admin — completely separate layout, no navbar/footer
+  {
+    path: "/admin",
+    element: (
+      <AdminRoute>
+        <AdminLayout />
+      </AdminRoute>
+    ),
+    children: [
+      { index: true, element: <AdminDashboard /> },
+      { path: "orders", element: <AdminOrders /> },
+      { path: "menu", element: <AdminMenu /> },
+      { path: "users", element: <AdminUsers /> },
+      { path: "debug", element: <AdminDebug /> },
+    ],
+  },
+  { path: "*", element: <NotFound /> },
 ]);
