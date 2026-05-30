@@ -893,6 +893,12 @@ export const getTestimonials = async () => {
     },
   ];
 };
+export const submitEventBooking = async (data) => {
+  // This is now handled directly in EventDetail via Supabase
+  // Keeping for backwards compatibility
+  await delay(500);
+  return { success: true };
+};
 
 export const getStats = async () => {
   await delay(300);
