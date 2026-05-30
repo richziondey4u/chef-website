@@ -1,6 +1,7 @@
 import { createBrowserRouter } from "react-router-dom";
 import RootLayout from "../components/layout/RootLayout";
 import AdminRoute from "../components/guards/AdminRoute";
+import ProtectedRoute from "../components/guards/ProtectedRoute";
 import Home from "../pages/Home";
 import ResetPassword from '../pages/ResetPassword';
 import Chefs from "../pages/Chef";
@@ -36,9 +37,9 @@ export const router = createBrowserRouter([
       {
         path: "profile",
         element: (
-          <AdminRoute>
+          <ProtectedRoute>
             <Profile />
-          </AdminRoute>
+          </ProtectedRoute>
         ),
       },
     ],
