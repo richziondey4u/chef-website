@@ -1,25 +1,97 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { Menu, User, LogOut, ShoppingBag, Settings, ChevronDown, Shield } from 'lucide-react';
+import {
+  Menu, User, LogOut, ShoppingBag,
+  ChevronDown, Shield, Calendar
+} from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuth } from '../../context/AuthContext';
 import { NAV_LINKS } from '../../constants';
 
+// ── Avatar component — photo or initials fallback ─────────────
+function Avatar({ profile, user, size = 'md' }) {
+  const initials = profile?.full_name
+    ? profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
+    : user?.email?.[0]?.toUpperCase() || '?';
+
+  const sizes = {
+    sm: 'w-8 h-8 text-xs',
+    md: 'w-9 h-9 text-sm',
+    lg: 'w-10 h-10 text-sm',
+  };
+
+  if (profile?.avatar_url) {
+    return (
+      <img
+        src={profile.avatar_url}
+        alt={profile?.full_name || 'Profile'}
+        className={`${sizes[size]} rounded-full object-cover border-2
+          border-gold/30 shrink-0`}
+      />
+    );
+  }
+
+  return (
+    <div className={`${sizes[size]} rounded-full bg-gold flex items-center
+      justify-center text-charcoal font-body font-medium shrink-0`}>
+      {initials}
+    </div>
+  );
+}
+
+// ── Time-based greeting ───────────────────────────────────────
+function getGreeting(name) {
+  const hour      = new Date().getHours();
+  const firstName = name?.split(' ')[0] || '';
+  if (hour < 12) return `Good morning${firstName ? `, ${firstName}` : ''} ☀️`;
+  if (hour < 17) return `Good afternoon${firstName ? `, ${firstName}` : ''} 🌤`;
+  if (hour < 21) return `Good evening${firstName ? `, ${firstName}` : ''} 🌆`;
+  return `Good night${firstName ? `, ${firstName}` : ''} 🌙`;
+}
+
+// ── Dropdown item ─────────────────────────────────────────────
+function DropdownItem({ icon: Icon, label, onClick, danger, gold, badge }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full flex items-center gap-3 px-4 py-2.5 font-body text-sm
+        transition-colors text-left group
+        ${danger ? 'text-red-500 hover:bg-red-50'  :
+          gold   ? 'text-gold   hover:bg-gold/10'   :
+                   'text-charcoal hover:bg-gray-50' }`}
+    >
+      <Icon size={14} className="shrink-0" />
+      <span className="flex-1">{label}</span>
+      {badge && (
+        <span className="text-xs bg-gold text-charcoal px-1.5 py-0.5 font-body
+          font-medium">
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// ── Main Navbar ───────────────────────────────────────────────
 export default function Navbar() {
-  const [scrolled, setScrolled]   = useState(false);
-  const [dropdown, setDropdown]   = useState(false);
-  const dropdownRef               = useRef(null);
-  const navigate                  = useNavigate();
+  const [scrolled, setScrolled] = useState(false);
+  const [dropdown, setDropdown] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const navigate    = useNavigate();
   const { user, profile, isAdmin, signOut } = useAuth();
 
-  // Shadow on scroll
+  const firstName = profile?.full_name?.split(' ')[0] || 'Account';
+  const greeting  = getGreeting(profile?.full_name);
+
+  // Scroll shadow
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener('scroll', onScroll);
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Close dropdown when clicking outside
+  // Close dropdown on outside click
   useEffect(() => {
     const handler = (e) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
@@ -32,29 +104,31 @@ export default function Navbar() {
 
   const handleSignOut = async () => {
     setDropdown(false);
+    setSheetOpen(false);
     await signOut();
     navigate('/');
+  };
+
+  const goTo = (path) => {
+    setDropdown(false);
+    setSheetOpen(false);
+    navigate(path);
   };
 
   const linkClass = ({ isActive }) =>
     `gold-underline font-body text-sm tracking-wide transition-colors duration-200
      ${isActive ? 'text-gold' : 'text-charcoal hover:text-gold'}`;
 
-  // Avatar initials
-  const initials = profile?.full_name
-    ? profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
-    : user?.email?.[0]?.toUpperCase() || '?';
-
   return (
-    <header className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300
-      ${scrolled
-        ? 'bg-cream/95 backdrop-blur-md shadow-sm border-b border-gold/20'
-        : 'bg-cream/80 backdrop-blur-sm border-b border-transparent'
-      }`}
+    <header
+      className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300
+        ${scrolled
+          ? 'bg-cream/95 backdrop-blur-md shadow-sm border-b border-gold/20'
+          : 'bg-cream/80 backdrop-blur-sm border-b border-transparent'}`}
     >
       <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
 
-        {/* Logo */}
+        {/* ── Logo ── */}
         <NavLink to="/" className="flex flex-col leading-none group">
           <span
             className="text-gold tracking-widest uppercase group-hover:opacity-80
@@ -68,7 +142,7 @@ export default function Navbar() {
           </span>
         </NavLink>
 
-        {/* Desktop nav */}
+        {/* ── Desktop nav links ── */}
         <nav className="hidden md:flex items-center gap-8">
           {NAV_LINKS.map(({ label, path }) => (
             <NavLink key={path} to={path} end={path === '/'} className={linkClass}>
@@ -77,28 +151,27 @@ export default function Navbar() {
           ))}
         </nav>
 
-        {/* Right side */}
+        {/* ── Desktop right side ── */}
         <div className="hidden md:flex items-center gap-3">
-
           {user ? (
-            // ── Logged in — show avatar dropdown ──────────
+            // ── Logged in dropdown ──────────────────────────
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setDropdown(d => !d)}
-                className="flex items-center gap-2 group"
+                className="flex items-center gap-2 group py-1 px-1 rounded-full
+                  hover:bg-gold/5 transition-colors"
               >
-                {/* Avatar circle */}
-                <div className="w-9 h-9 rounded-full bg-gold flex items-center
-                  justify-center text-charcoal font-body text-sm font-medium
-                  group-hover:bg-gold/80 transition-colors shrink-0">
-                  {initials}
-                </div>
+                <Avatar profile={profile} user={user} size="md" />
 
-                {/* Name — desktop only */}
-                <span className="font-body text-sm text-charcoal group-hover:text-gold
-                  transition-colors max-w-[100px] truncate hidden lg:block">
-                  {profile?.full_name?.split(' ')[0] || 'Account'}
-                </span>
+                <div className="hidden lg:block text-left">
+                  <div className="font-body text-xs text-warm-gray leading-none mb-0.5">
+                    {greeting.split(',')[0]}
+                  </div>
+                  <div className="font-body text-sm text-charcoal group-hover:text-gold
+                    transition-colors max-w-[100px] truncate leading-none">
+                    {firstName}
+                  </div>
+                </div>
 
                 <ChevronDown
                   size={14}
@@ -107,24 +180,30 @@ export default function Navbar() {
                 />
               </button>
 
-              {/* Dropdown menu */}
+              {/* Dropdown */}
               {dropdown && (
-                <div className="absolute right-0 top-full mt-2 w-56 bg-white
-                  border border-gold/20 shadow-xl z-50 py-1">
+                <div className="absolute right-0 top-full mt-2 w-60 bg-white
+                  border border-gold/20 shadow-xl z-50 overflow-hidden">
 
-                  {/* User info header */}
-                  <div className="px-4 py-3 border-b border-gold/10">
-                    <p className="font-body text-sm font-medium text-charcoal truncate">
-                      {profile?.full_name || 'User'}
-                    </p>
-                    <p className="font-body text-xs text-warm-gray truncate mt-0.5">
-                      {user.email}
-                    </p>
-                    <span className={`inline-block mt-1.5 text-xs font-body px-2
-                      py-0.5 capitalize
+                  {/* Header — greeting + user info */}
+                  <div className="px-4 py-4 border-b border-gold/10 bg-cream/50">
+                    <div className="flex items-center gap-3 mb-3">
+                      <Avatar profile={profile} user={user} size="lg" />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-body text-sm font-medium text-charcoal
+                          truncate">
+                          {profile?.full_name || 'User'}
+                        </p>
+                        <p className="font-body text-xs text-warm-gray truncate mt-0.5">
+                          {user.email}
+                        </p>
+                      </div>
+                    </div>
+                    <span className={`inline-block text-xs font-body px-2 py-0.5
+                      capitalize border
                       ${isAdmin
-                        ? 'bg-gold/20 text-gold border border-gold/30'
-                        : 'bg-gray-100 text-gray-500'}`}>
+                        ? 'bg-gold/20 text-gold border-gold/30'
+                        : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
                       {profile?.role || 'user'}
                     </span>
                   </div>
@@ -134,13 +213,19 @@ export default function Navbar() {
                     <DropdownItem
                       icon={User}
                       label="My Profile"
-                      onClick={() => { navigate('/profile'); setDropdown(false); }}
+                      onClick={() => goTo('/profile')}
                     />
                     <DropdownItem
                       icon={ShoppingBag}
                       label="Order History"
-                      onClick={() => { navigate('/profile?tab=orders'); setDropdown(false); }}
+                      onClick={() => goTo('/profile?tab=orders')}
                     />
+                    <DropdownItem
+                      icon={Calendar}
+                      label="Event Bookings"
+                      onClick={() => goTo('/profile?tab=bookings')}
+                    />
+
                     {isAdmin && (
                       <>
                         <div className="border-t border-gold/10 my-1" />
@@ -148,10 +233,11 @@ export default function Navbar() {
                           icon={Shield}
                           label="Admin Panel"
                           gold
-                          onClick={() => { navigate('/admin'); setDropdown(false); }}
+                          onClick={() => goTo('/admin')}
                         />
                       </>
                     )}
+
                     <div className="border-t border-gold/10 my-1" />
                     <DropdownItem
                       icon={LogOut}
@@ -164,7 +250,7 @@ export default function Navbar() {
               )}
             </div>
           ) : (
-            // ── Not logged in — show login + register ──────
+            // ── Not logged in ───────────────────────────────
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigate('/auth')}
@@ -186,77 +272,85 @@ export default function Navbar() {
           )}
         </div>
 
-        {/* Mobile — hamburger + avatar */}
+        {/* ── Mobile right side ── */}
         <div className="md:hidden flex items-center gap-3">
 
-          {/* Mobile avatar or login icon */}
+          {/* Mobile avatar — taps to profile */}
           {user ? (
             <button
-              onClick={() => navigate('/profile')}
-              className="w-8 h-8 rounded-full bg-gold flex items-center justify-center
-                text-charcoal font-body text-xs font-medium"
+              onClick={() => goTo('/profile')}
+              className="shrink-0 hover:opacity-80 transition-opacity"
             >
-              {initials}
+              <Avatar profile={profile} user={user} size="sm" />
             </button>
           ) : (
             <button
               onClick={() => navigate('/auth')}
-              className="text-charcoal hover:text-gold transition-colors"
+              className="text-charcoal hover:text-gold transition-colors p-1"
             >
               <User size={20} />
             </button>
           )}
 
-          {/* Mobile sheet drawer */}
-          <Sheet>
+          {/* Hamburger sheet */}
+          <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
             <SheetTrigger asChild>
               <button className="p-1 text-charcoal hover:text-gold transition-colors">
                 <Menu size={22} />
               </button>
             </SheetTrigger>
+
             <SheetContent
               side="right"
-              className="bg-cream border-l border-gold/20 w-72 flex flex-col pt-16"
+              className="bg-cream border-l border-gold/20 w-72 flex flex-col p-0"
             >
-              {/* Logo inside drawer */}
-              <div className="px-6 mb-8">
-                <div className="text-gold tracking-widest uppercase font-body"
+              {/* Sheet header */}
+              <div className="px-6 pt-8 pb-6 border-b border-gold/15">
+                <div className="text-gold tracking-widest uppercase font-body mb-1"
                   style={{ fontSize: 9 }}>MAISON</div>
                 <div className="font-display text-3xl font-light tracking-wide
                   text-charcoal">Fontaine</div>
                 <div className="w-10 h-px bg-gold mt-3" />
               </div>
 
-              {/* User info in drawer */}
-              {user && (
-                <div className="px-6 mb-6 pb-6 border-b border-gold/15">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-gold flex items-center
-                      justify-center text-charcoal font-body text-sm font-medium shrink-0">
-                      {initials}
-                    </div>
-                    <div className="min-w-0">
+              {/* User section in drawer */}
+              {user ? (
+                <div className="px-6 py-5 border-b border-gold/15 bg-cream">
+                  <div className="flex items-center gap-3 mb-3">
+                    <Avatar profile={profile} user={user} size="lg" />
+                    <div className="min-w-0 flex-1">
                       <p className="font-body text-sm font-medium text-charcoal truncate">
                         {profile?.full_name || 'User'}
                       </p>
-                      <p className="font-body text-xs text-warm-gray truncate">
+                      <p className="font-body text-xs text-warm-gray truncate mt-0.5">
                         {user.email}
                       </p>
                     </div>
                   </div>
+                  {/* Greeting */}
+                  <p className="font-body text-xs text-warm-gray italic">
+                    {greeting}
+                  </p>
+                  {isAdmin && (
+                    <span className="inline-block mt-2 text-xs font-body px-2
+                      py-0.5 bg-gold/20 text-gold border border-gold/30 capitalize">
+                      {profile?.role}
+                    </span>
+                  )}
                 </div>
-              )}
+              ) : null}
 
               {/* Nav links */}
-              <nav className="flex flex-col px-6 gap-1 flex-1">
+              <nav className="flex flex-col px-6 py-2 flex-1 overflow-y-auto">
                 {NAV_LINKS.map(({ label, path }) => (
                   <NavLink
                     key={path}
                     to={path}
                     end={path === '/'}
+                    onClick={() => setSheetOpen(false)}
                     className={({ isActive }) =>
-                      `font-body text-base tracking-wide py-3 border-b border-gold/10
-                       transition-colors
+                      `font-body text-base tracking-wide py-3.5 border-b
+                       border-gold/10 transition-colors
                        ${isActive ? 'text-gold' : 'text-charcoal hover:text-gold'}`
                     }
                   >
@@ -264,13 +358,38 @@ export default function Navbar() {
                   </NavLink>
                 ))}
 
-                {/* Admin link in mobile drawer */}
+                {/* User-only links */}
+                {user && (
+                  <>
+                    <button
+                      onClick={() => goTo('/profile?tab=orders')}
+                      className="flex items-center gap-2 font-body text-base
+                        tracking-wide py-3.5 border-b border-gold/10 text-charcoal
+                        hover:text-gold transition-colors text-left"
+                    >
+                      <ShoppingBag size={14} />
+                      Order History
+                    </button>
+                    <button
+                      onClick={() => goTo('/profile?tab=bookings')}
+                      className="flex items-center gap-2 font-body text-base
+                        tracking-wide py-3.5 border-b border-gold/10 text-charcoal
+                        hover:text-gold transition-colors text-left"
+                    >
+                      <Calendar size={14} />
+                      Event Bookings
+                    </button>
+                  </>
+                )}
+
+                {/* Admin link */}
                 {isAdmin && (
                   <NavLink
                     to="/admin"
+                    onClick={() => setSheetOpen(false)}
                     className={({ isActive }) =>
-                      `font-body text-base tracking-wide py-3 border-b border-gold/10
-                       transition-colors flex items-center gap-2
+                      `flex items-center gap-2 font-body text-base tracking-wide
+                       py-3.5 border-b border-gold/10 transition-colors
                        ${isActive ? 'text-gold' : 'text-charcoal hover:text-gold'}`
                     }
                   >
@@ -281,11 +400,11 @@ export default function Navbar() {
               </nav>
 
               {/* Bottom actions */}
-              <div className="px-6 pb-10 pt-4 space-y-3 border-t border-gold/15">
+              <div className="px-6 pb-8 pt-4 border-t border-gold/15 space-y-3">
                 {user ? (
                   <>
                     <button
-                      onClick={() => navigate('/profile')}
+                      onClick={() => goTo('/profile')}
                       className="w-full flex items-center gap-2 font-body text-sm
                         text-charcoal hover:text-gold transition-colors py-2"
                     >
@@ -304,18 +423,18 @@ export default function Navbar() {
                 ) : (
                   <>
                     <button
-                      onClick={() => navigate('/auth')}
+                      onClick={() => { navigate('/auth'); setSheetOpen(false); }}
                       className="w-full bg-charcoal text-cream text-xs tracking-widest
-                        uppercase py-3 hover:bg-gold hover:text-charcoal transition-all
-                        font-body"
+                        uppercase py-3.5 hover:bg-gold hover:text-charcoal
+                        transition-all font-body"
                     >
                       Sign In
                     </button>
                     <button
-                      onClick={() => navigate('/auth?tab=register')}
+                      onClick={() => { navigate('/auth?tab=register'); setSheetOpen(false); }}
                       className="w-full border border-charcoal text-charcoal text-xs
-                        tracking-widest uppercase py-3 hover:bg-charcoal hover:text-cream
-                        transition-all font-body"
+                        tracking-widest uppercase py-3.5 hover:bg-charcoal
+                        hover:text-cream transition-all font-body"
                     >
                       Create Account
                     </button>
@@ -327,22 +446,5 @@ export default function Navbar() {
         </div>
       </div>
     </header>
-  );
-}
-
-// ── Reusable dropdown item ──────────────────────────────────
-function DropdownItem({ icon: Icon, label, onClick, danger, gold }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-3 px-4 py-2.5 font-body text-sm
-        transition-colors text-left
-        ${danger ? 'text-red-500 hover:bg-red-50' :
-          gold   ? 'text-gold   hover:bg-gold/10'  :
-                   'text-charcoal hover:bg-gray-50'}`}
-    >
-      <Icon size={14} className="shrink-0" />
-      {label}
-    </button>
   );
 }
