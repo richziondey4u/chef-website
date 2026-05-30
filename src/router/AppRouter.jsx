@@ -1,8 +1,8 @@
 import { createBrowserRouter } from "react-router-dom";
 import RootLayout from "../components/layout/RootLayout";
-import ProtectedRoute from "../components/guards/ProtectedRoute";
-import AdminRoute from "../components/guards/ProtectedRoute";
+import AdminRoute from "../components/guards/AdminRoute";
 import Home from "../pages/Home";
+import ResetPassword from '../pages/ResetPassword';
 import Chefs from "../pages/Chef";
 import Menu from "../pages/Menu";
 import AdminDebug from "../pages/admin/AdminDebug";
@@ -32,12 +32,13 @@ export const router = createBrowserRouter([
       { path: "events/:service", element: <EventDetail /> },
       { path: "contact", element: <Contact /> },
       { path: "auth", element: <AuthPage /> },
+      { path: 'reset-password', element: <ResetPassword /> },
       {
         path: "profile",
         element: (
-          <ProtectedRoute>
+          <AdminRoute>
             <Profile />
-          </ProtectedRoute>
+          </AdminRoute>
         ),
       },
     ],

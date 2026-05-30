@@ -68,29 +68,19 @@ function OtpInput({ value, onChange }) {
 }
 
 export default function AuthPage() {
-  const navigate   = useNavigate();
-  const location   = useLocation();
-  const [params]   = useSearchParams();
-  const { user }   = useAuth();
+  const navigate        = useNavigate();
+  const location        = useLocation();
+  const [params]        = useSearchParams();
+  const { user }        = useAuth();
 
-  // ── If already logged in, redirect away from auth page ──
-  useEffect(() => {
-    if (user) {
-      const from = location.state?.from?.pathname || '/';
-      // Don't redirect back to /auth
-      const dest = from === '/auth' ? '/' : from;
-      navigate(dest, { replace: true });
-    }
-  }, [user, navigate, location]);
+  const isTimeout       = params.get('reason') === 'timeout';
+  const defaultTab      = params.get('tab') === 'register' ? 'register' : 'login';
 
-  const isTimeout  = params.get('reason') === 'timeout';
-  const defaultTab = params.get('tab') === 'register' ? 'register' : 'login';
-
-  const [tab, setTab]           = useState(defaultTab);
-  const [step, setStep]         = useState('form');
-  const [loading, setLoading]   = useState(false);
-  const [showPass, setShowPass] = useState(false);
-  const [otpCode, setOtpCode]   = useState('');
+  const [tab, setTab]               = useState(defaultTab);
+  const [step, setStep]             = useState('form');
+  const [loading, setLoading]       = useState(false);
+  const [showPass, setShowPass]     = useState(false);
+  const [otpCode, setOtpCode]       = useState('');
   const [captchaDone, setCaptchaDone] = useState(false);
   const [resendTimer, setResendTimer] = useState(0);
   const recaptchaRef  = useRef(null);
@@ -98,6 +88,17 @@ export default function AuthPage() {
   const [form, setForm] = useState(EMPTY_FORM);
 
   const passwordStrength = getPasswordStrength(form.password);
+
+  // ── Redirect if already logged in ─────────────────────────
+  // Only redirect when NOT in OTP step — user is technically
+  // signed in during OTP but hasn't verified yet
+  useEffect(() => {
+    if (user && step !== 'otp') {
+      const from = location.state?.from?.pathname || '/';
+      const dest = from === '/auth' ? '/' : from;
+      navigate(dest, { replace: true });
+    }
+  }, [user, step, navigate, location]);
 
   const inputCls = `w-full bg-transparent border-b border-warm-gray/30 py-3 font-body
     text-sm text-charcoal placeholder-warm-gray/50 focus:border-gold
@@ -130,14 +131,20 @@ export default function AuthPage() {
     const code      = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     await supabase.from('otp_codes').insert({ email, code, expires_at: expiresAt });
-    await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-otp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ email, code }),
-    });
+
+    // Send via Supabase Edge Function
+    const res = await fetch(
+      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-otp`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+        body: JSON.stringify({ email, code }),
+      }
+    );
+    if (!res.ok) throw new Error('Failed to send OTP');
     startResendTimer();
   };
 
@@ -159,6 +166,7 @@ export default function AuthPage() {
             full_name: form.full_name.trim(),
             phone:     form.phone.trim(),
           },
+          // Must match Supabase Dashboard → Auth → Redirect URLs
           emailRedirectTo: `${window.location.origin}/auth`,
         },
       });
@@ -186,24 +194,24 @@ export default function AuthPage() {
       });
       if (error) throw error;
 
-      // Check if first login
+      // Fetch profile to check first login
       const { data: profileData } = await supabase
         .from('profiles')
         .select('last_seen, created_at')
         .eq('id', data.user.id)
         .single();
 
-      const lastSeen  = new Date(profileData?.last_seen).getTime();
-      const createdAt = new Date(profileData?.created_at).getTime();
+      const lastSeen   = new Date(profileData?.last_seen).getTime();
+      const createdAt  = new Date(profileData?.created_at).getTime();
       const isFirstLogin = Math.abs(lastSeen - createdAt) < 30000;
 
       if (isFirstLogin) {
+        // Keep on OTP step — suppress the redirect useEffect
         await sendOTP(form.email.trim().toLowerCase());
         setStep('otp');
         toast.success('OTP sent to your email');
       } else {
-        // ← AuthContext will detect SIGNED_IN and update user
-        // ← the useEffect above will then redirect automatically
+        // Returning user — useEffect handles redirect via user state
         toast.success('Welcome back!');
       }
     } catch (err) {
@@ -215,10 +223,12 @@ export default function AuthPage() {
 
   // ── Verify OTP ─────────────────────────────────────────────
   const handleOTP = async () => {
-    if (otpCode.length !== 6) { toast.error('Enter the complete 6-digit code'); return; }
+    if (otpCode.length !== 6) {
+      toast.error('Enter the complete 6-digit code'); return;
+    }
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data: otpData, error: otpErr } = await supabase
         .from('otp_codes')
         .select('*')
         .eq('email', form.email.trim().toLowerCase())
@@ -227,18 +237,36 @@ export default function AuthPage() {
         .gte('expires_at', new Date().toISOString())
         .single();
 
-      if (error || !data) throw new Error('Invalid or expired code. Please try again.');
+      if (otpErr || !otpData) {
+        throw new Error('Invalid or expired code. Please try again.');
+      }
 
-      await supabase.from('otp_codes').update({ used: true }).eq('id', data.id);
-
-      // Update last_seen so future logins skip OTP
+      // Mark OTP as used
       await supabase
-        .from('profiles')
-        .update({ last_seen: new Date().toISOString() })
-        .eq('id', (await supabase.auth.getUser()).data.user?.id);
+        .from('otp_codes')
+        .update({ used: true })
+        .eq('id', otpData.id);
+
+      // Get current user and update last_seen
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      if (currentUser) {
+        await supabase
+          .from('profiles')
+          .update({ last_seen: new Date().toISOString() })
+          .eq('id', currentUser.id);
+      }
 
       toast.success('Welcome to Maison Fontaine!');
-      // useEffect will handle redirect once user state updates
+
+      // Now allow the redirect useEffect to fire
+      // by changing step away from 'otp'
+      setStep('verified');
+
+      // Navigate manually as a backup
+      const from = location.state?.from?.pathname || '/';
+      const dest = from === '/auth' ? '/' : from;
+      navigate(dest, { replace: true });
+
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -269,21 +297,34 @@ export default function AuthPage() {
     });
   };
 
+  // ── Forgot password — fixed redirect ──────────────────────
   const handleForgotPassword = async () => {
-    if (!form.email.trim()) { toast.error('Enter your email address first'); return; }
+    if (!form.email.trim()) {
+      toast.error('Enter your email address first'); return;
+    }
+    setLoading(true);
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(
         form.email.trim().toLowerCase(),
-        { redirectTo: `${window.location.origin}/auth` }
+        {
+          // ← Fixed: points to /reset-password not /auth
+          redirectTo: `${window.location.origin}/reset-password`,
+        }
       );
       if (error) throw error;
-      toast.success('Password reset link sent!');
+      toast.success(
+        'Password reset link sent! Check your email.',
+        { duration: 5000 }
+      );
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // ── Verify email screen ────────────────────────────────────
+  // ── Screens ────────────────────────────────────────────────
+
   if (step === 'verify-email') {
     return (
       <div className="min-h-screen bg-cream flex items-center justify-center px-6">
@@ -311,7 +352,6 @@ export default function AuthPage() {
     );
   }
 
-  // ── OTP screen ─────────────────────────────────────────────
   if (step === 'otp') {
     return (
       <div className="min-h-screen bg-cream flex items-center justify-center px-6">
@@ -320,9 +360,7 @@ export default function AuthPage() {
             <div className="text-5xl mb-4">🔐</div>
             <h1 className="font-display text-4xl font-light">Verify your identity</h1>
             <div className="w-14 h-px bg-gold mx-auto my-4" />
-            <p className="text-warm-gray font-body text-sm">
-              6-digit code sent to
-            </p>
+            <p className="text-warm-gray font-body text-sm">6-digit code sent to</p>
             <p className="font-body font-medium text-charcoal mt-1">{form.email}</p>
           </div>
           <div className="bg-white border border-gold/15 p-8">
@@ -349,7 +387,8 @@ export default function AuthPage() {
                 <button
                   onClick={handleResendOTP}
                   disabled={loading}
-                  className="text-gold font-body text-xs hover:underline disabled:opacity-50"
+                  className="text-gold font-body text-xs hover:underline
+                    disabled:opacity-50"
                 >
                   Didn't receive it? Resend OTP
                 </button>
@@ -371,12 +410,11 @@ export default function AuthPage() {
     );
   }
 
-  // ── Main form ──────────────────────────────────────────────
+  // ── Main login/register form ───────────────────────────────
   return (
     <div className="min-h-screen bg-cream flex items-center justify-center px-6 py-16">
       <div className="max-w-md w-full">
 
-        {/* Logo */}
         <div className="text-center mb-10">
           <div className="text-gold tracking-widest uppercase mb-1 font-body"
             style={{ fontSize: 9, letterSpacing: '0.3em' }}>
@@ -393,7 +431,6 @@ export default function AuthPage() {
           )}
         </div>
 
-        {/* Tabs */}
         <div className="flex border-b border-gold/20 mb-8">
           {['login', 'register'].map(t => (
             <button key={t} onClick={() => switchTab(t)}
@@ -412,32 +449,35 @@ export default function AuthPage() {
 
             {tab === 'register' && (
               <div>
-                <label className="text-gold tracking-widest uppercase block mb-2 font-body"
-                  style={{ fontSize: 9 }}>Full Name *</label>
-                <input name="full_name" value={form.full_name} onChange={handleChange}
-                  placeholder="Your full name" autoComplete="name" className={inputCls} />
+                <label className="text-gold tracking-widest uppercase block mb-2
+                  font-body" style={{ fontSize: 9 }}>Full Name *</label>
+                <input name="full_name" value={form.full_name}
+                  onChange={handleChange} placeholder="Your full name"
+                  autoComplete="name" className={inputCls} />
               </div>
             )}
 
             <div>
-              <label className="text-gold tracking-widest uppercase block mb-2 font-body"
-                style={{ fontSize: 9 }}>Email Address *</label>
-              <input name="email" type="email" value={form.email} onChange={handleChange}
-                placeholder="your@email.com" autoComplete="email" className={inputCls} />
+              <label className="text-gold tracking-widest uppercase block mb-2
+                font-body" style={{ fontSize: 9 }}>Email Address *</label>
+              <input name="email" type="email" value={form.email}
+                onChange={handleChange} placeholder="your@email.com"
+                autoComplete="email" className={inputCls} />
             </div>
 
             {tab === 'register' && (
               <div>
-                <label className="text-gold tracking-widest uppercase block mb-2 font-body"
-                  style={{ fontSize: 9 }}>Phone Number</label>
-                <input name="phone" type="tel" value={form.phone} onChange={handleChange}
-                  placeholder="+234 800 000 0000" autoComplete="tel" className={inputCls} />
+                <label className="text-gold tracking-widest uppercase block mb-2
+                  font-body" style={{ fontSize: 9 }}>Phone Number</label>
+                <input name="phone" type="tel" value={form.phone}
+                  onChange={handleChange} placeholder="+234 800 000 0000"
+                  autoComplete="tel" className={inputCls} />
               </div>
             )}
 
             <div>
-              <label className="text-gold tracking-widest uppercase block mb-2 font-body"
-                style={{ fontSize: 9 }}>Password *</label>
+              <label className="text-gold tracking-widest uppercase block mb-2
+                font-body" style={{ fontSize: 9 }}>Password *</label>
               <div className="relative">
                 <input name="password" type={showPass ? 'text' : 'password'}
                   value={form.password} onChange={handleChange}
@@ -445,8 +485,8 @@ export default function AuthPage() {
                   autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
                   className={`${inputCls} pr-10`} />
                 <button type="button" onClick={() => setShowPass(p => !p)}
-                  className="absolute right-0 bottom-3 text-warm-gray hover:text-gold
-                    transition-colors">
+                  className="absolute right-0 bottom-3 text-warm-gray
+                    hover:text-gold transition-colors">
                   {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
@@ -463,7 +503,8 @@ export default function AuthPage() {
                   </div>
                   {passwordStrength.label && (
                     <p className="text-xs font-body text-warm-gray">
-                      Strength: <span className="font-medium">{passwordStrength.label}</span>
+                      Strength:{' '}
+                      <span className="font-medium">{passwordStrength.label}</span>
                     </p>
                   )}
                 </div>
@@ -485,9 +526,9 @@ export default function AuthPage() {
             <button type="button"
               onClick={tab === 'login' ? handleLogin : handleRegister}
               disabled={loading}
-              className="w-full bg-charcoal text-cream text-xs tracking-widest uppercase
-                py-4 hover:bg-gold hover:text-charcoal transition-all font-body
-                disabled:opacity-60 flex items-center justify-center gap-2">
+              className="w-full bg-charcoal text-cream text-xs tracking-widest
+                uppercase py-4 hover:bg-gold hover:text-charcoal transition-all
+                font-body disabled:opacity-60 flex items-center justify-center gap-2">
               {loading && (
                 <div className="w-4 h-4 border-2 border-cream/30 border-t-cream
                   rounded-full animate-spin" />
@@ -508,8 +549,9 @@ export default function AuthPage() {
             {tab === 'login' && (
               <div className="text-center">
                 <button type="button" onClick={handleForgotPassword}
+                  disabled={loading}
                   className="text-warm-gray text-xs font-body hover:text-gold
-                    transition-colors">
+                    transition-colors disabled:opacity-50">
                   Forgot your password?
                 </button>
               </div>
