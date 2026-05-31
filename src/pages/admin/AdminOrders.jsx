@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
 import toast from "react-hot-toast";
-import { Search, Filter, AlertCircle, RefreshCw } from "lucide-react";
+import { Search, Filter, AlertCircle, RefreshCw, ShoppingBag } from "lucide-react";
 
 const STATUSES = [
   "all",
