@@ -1,15 +1,17 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   Menu, User, LogOut, ShoppingBag,
-  ChevronDown, Shield, Calendar
+  ChevronDown, Shield, Calendar, RefreshCw
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuth } from '../../context/AuthContext';
 import { NAV_LINKS } from '../../constants';
 
-// ── Avatar component — photo or initials fallback ─────────────
+// ── Avatar — photo or initials ────────────────────────────────
 function Avatar({ profile, user, size = 'md' }) {
+  const [imgError, setImgError] = useState(false);
+
   const initials = profile?.full_name
     ? profile.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)
     : user?.email?.[0]?.toUpperCase() || '?';
@@ -20,33 +22,35 @@ function Avatar({ profile, user, size = 'md' }) {
     lg: 'w-10 h-10 text-sm',
   };
 
-  if (profile?.avatar_url) {
+  if (profile?.avatar_url && !imgError) {
     return (
       <img
         src={profile.avatar_url}
         alt={profile?.full_name || 'Profile'}
         className={`${sizes[size]} rounded-full object-cover border-2
           border-gold/30 shrink-0`}
+        onError={() => setImgError(true)}
       />
     );
   }
 
   return (
     <div className={`${sizes[size]} rounded-full bg-gold flex items-center
-      justify-center text-charcoal font-body font-medium shrink-0`}>
+      justify-center text-charcoal font-body font-medium shrink-0 select-none`}>
       {initials}
     </div>
   );
 }
 
-// ── Time-based greeting ───────────────────────────────────────
+// ── Greeting ──────────────────────────────────────────────────
 function getGreeting(name) {
   const hour      = new Date().getHours();
   const firstName = name?.split(' ')[0] || '';
-  if (hour < 12) return `Good morning${firstName ? `, ${firstName}` : ''} ☀️`;
-  if (hour < 17) return `Good afternoon${firstName ? `, ${firstName}` : ''} 🌤`;
-  if (hour < 21) return `Good evening${firstName ? `, ${firstName}` : ''} 🌆`;
-  return `Good night${firstName ? `, ${firstName}` : ''} 🌙`;
+  const suffix    = firstName ? `, ${firstName}` : '';
+  if (hour < 12) return `Good morning${suffix} ☀️`;
+  if (hour < 17) return `Good afternoon${suffix} 🌤`;
+  if (hour < 21) return `Good evening${suffix} 🌆`;
+  return `Good night${suffix} 🌙`;
 }
 
 // ── Dropdown item ─────────────────────────────────────────────
@@ -55,7 +59,7 @@ function DropdownItem({ icon: Icon, label, onClick, danger, gold, badge }) {
     <button
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-4 py-2.5 font-body text-sm
-        transition-colors text-left group
+        transition-colors text-left
         ${danger ? 'text-red-500 hover:bg-red-50'  :
           gold   ? 'text-gold   hover:bg-gold/10'   :
                    'text-charcoal hover:bg-gray-50' }`}
@@ -63,8 +67,8 @@ function DropdownItem({ icon: Icon, label, onClick, danger, gold, badge }) {
       <Icon size={14} className="shrink-0" />
       <span className="flex-1">{label}</span>
       {badge && (
-        <span className="text-xs bg-gold text-charcoal px-1.5 py-0.5 font-body
-          font-medium">
+        <span className="text-xs bg-gold text-charcoal px-1.5 py-0.5
+          font-body font-medium">
           {badge}
         </span>
       )}
@@ -74,12 +78,14 @@ function DropdownItem({ icon: Icon, label, onClick, danger, gold, badge }) {
 
 // ── Main Navbar ───────────────────────────────────────────────
 export default function Navbar() {
-  const [scrolled, setScrolled] = useState(false);
-  const [dropdown, setDropdown] = useState(false);
+  const [scrolled,  setScrolled]  = useState(false);
+  const [dropdown,  setDropdown]  = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const dropdownRef = useRef(null);
   const navigate    = useNavigate();
-  const { user, profile, isAdmin, signOut } = useAuth();
+
+  const { user, profile, isAdmin, signOut, fetchProfile } = useAuth();
 
   const firstName = profile?.full_name?.split(' ')[0] || 'Account';
   const greeting  = getGreeting(profile?.full_name);
@@ -109,10 +115,18 @@ export default function Navbar() {
     navigate('/');
   };
 
-  const goTo = (path) => {
+  const goTo = useCallback((path) => {
     setDropdown(false);
     setSheetOpen(false);
     navigate(path);
+  }, [navigate]);
+
+  // Manual role refresh — if they appear as wrong role
+  const handleRefreshRole = async () => {
+    if (!user || refreshing) return;
+    setRefreshing(true);
+    await fetchProfile(user.id);
+    setRefreshing(false);
   };
 
   const linkClass = ({ isActive }) =>
@@ -142,7 +156,7 @@ export default function Navbar() {
           </span>
         </NavLink>
 
-        {/* ── Desktop nav links ── */}
+        {/* ── Desktop nav ── */}
         <nav className="hidden md:flex items-center gap-8">
           {NAV_LINKS.map(({ label, path }) => (
             <NavLink key={path} to={path} end={path === '/'} className={linkClass}>
@@ -151,10 +165,9 @@ export default function Navbar() {
           ))}
         </nav>
 
-        {/* ── Desktop right side ── */}
+        {/* ── Desktop right ── */}
         <div className="hidden md:flex items-center gap-3">
           {user ? (
-            // ── Logged in dropdown ──────────────────────────
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setDropdown(d => !d)}
@@ -173,8 +186,7 @@ export default function Navbar() {
                   </div>
                 </div>
 
-                <ChevronDown
-                  size={14}
+                <ChevronDown size={14}
                   className={`text-warm-gray transition-transform duration-200
                     ${dropdown ? 'rotate-180' : ''}`}
                 />
@@ -182,16 +194,15 @@ export default function Navbar() {
 
               {/* Dropdown */}
               {dropdown && (
-                <div className="absolute right-0 top-full mt-2 w-60 bg-white
+                <div className="absolute right-0 top-full mt-2 w-64 bg-white
                   border border-gold/20 shadow-xl z-50 overflow-hidden">
 
-                  {/* Header — greeting + user info */}
+                  {/* Header */}
                   <div className="px-4 py-4 border-b border-gold/10 bg-cream/50">
                     <div className="flex items-center gap-3 mb-3">
                       <Avatar profile={profile} user={user} size="lg" />
                       <div className="min-w-0 flex-1">
-                        <p className="font-body text-sm font-medium text-charcoal
-                          truncate">
+                        <p className="font-body text-sm font-medium text-charcoal truncate">
                           {profile?.full_name || 'User'}
                         </p>
                         <p className="font-body text-xs text-warm-gray truncate mt-0.5">
@@ -199,16 +210,33 @@ export default function Navbar() {
                         </p>
                       </div>
                     </div>
-                    <span className={`inline-block text-xs font-body px-2 py-0.5
-                      capitalize border
-                      ${isAdmin
-                        ? 'bg-gold/20 text-gold border-gold/30'
-                        : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-                      {profile?.role || 'user'}
-                    </span>
+
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs font-body px-2 py-0.5 capitalize
+                        border
+                        ${isAdmin
+                          ? 'bg-gold/20 text-gold border-gold/30'
+                          : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                        {profile?.role || 'user'}
+                      </span>
+
+                      {/* Refresh role button — useful when role mismatch */}
+                      <button
+                        onClick={handleRefreshRole}
+                        disabled={refreshing}
+                        title="Refresh permissions"
+                        className="text-warm-gray/50 hover:text-gold transition-colors
+                          disabled:opacity-30"
+                      >
+                        <RefreshCw
+                          size={11}
+                          className={refreshing ? 'animate-spin' : ''}
+                        />
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Menu items */}
+                  {/* Links */}
                   <div className="py-1">
                     <DropdownItem
                       icon={User}
@@ -250,7 +278,6 @@ export default function Navbar() {
               )}
             </div>
           ) : (
-            // ── Not logged in ───────────────────────────────
             <div className="flex items-center gap-3">
               <button
                 onClick={() => navigate('/auth')}
@@ -272,10 +299,8 @@ export default function Navbar() {
           )}
         </div>
 
-        {/* ── Mobile right side ── */}
+        {/* ── Mobile right ── */}
         <div className="md:hidden flex items-center gap-3">
-
-          {/* Mobile avatar — taps to profile */}
           {user ? (
             <button
               onClick={() => goTo('/profile')}
@@ -292,7 +317,7 @@ export default function Navbar() {
             </button>
           )}
 
-          {/* Hamburger sheet */}
+          {/* Mobile sheet */}
           <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
             <SheetTrigger asChild>
               <button className="p-1 text-charcoal hover:text-gold transition-colors">
@@ -304,7 +329,7 @@ export default function Navbar() {
               side="right"
               className="bg-cream border-l border-gold/20 w-72 flex flex-col p-0"
             >
-              {/* Sheet header */}
+              {/* Sheet logo */}
               <div className="px-6 pt-8 pb-6 border-b border-gold/15">
                 <div className="text-gold tracking-widest uppercase font-body mb-1"
                   style={{ fontSize: 9 }}>MAISON</div>
@@ -313,10 +338,10 @@ export default function Navbar() {
                 <div className="w-10 h-px bg-gold mt-3" />
               </div>
 
-              {/* User section in drawer */}
-              {user ? (
-                <div className="px-6 py-5 border-b border-gold/15 bg-cream">
-                  <div className="flex items-center gap-3 mb-3">
+              {/* User info */}
+              {user && (
+                <div className="px-6 py-5 border-b border-gold/15">
+                  <div className="flex items-center gap-3 mb-2">
                     <Avatar profile={profile} user={user} size="lg" />
                     <div className="min-w-0 flex-1">
                       <p className="font-body text-sm font-medium text-charcoal truncate">
@@ -327,18 +352,34 @@ export default function Navbar() {
                       </p>
                     </div>
                   </div>
-                  {/* Greeting */}
-                  <p className="font-body text-xs text-warm-gray italic">
+
+                  <p className="font-body text-xs text-warm-gray italic mb-2">
                     {greeting}
                   </p>
-                  {isAdmin && (
-                    <span className="inline-block mt-2 text-xs font-body px-2
-                      py-0.5 bg-gold/20 text-gold border border-gold/30 capitalize">
-                      {profile?.role}
+
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs font-body px-2 py-0.5 capitalize
+                      border
+                      ${isAdmin
+                        ? 'bg-gold/20 text-gold border-gold/30'
+                        : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+                      {profile?.role || 'user'}
                     </span>
-                  )}
+                    <button
+                      onClick={handleRefreshRole}
+                      disabled={refreshing}
+                      title="Refresh permissions"
+                      className="text-warm-gray/50 hover:text-gold transition-colors
+                        disabled:opacity-30"
+                    >
+                      <RefreshCw
+                        size={11}
+                        className={refreshing ? 'animate-spin' : ''}
+                      />
+                    </button>
+                  </div>
                 </div>
-              ) : null}
+              )}
 
               {/* Nav links */}
               <nav className="flex flex-col px-6 py-2 flex-1 overflow-y-auto">
@@ -358,7 +399,6 @@ export default function Navbar() {
                   </NavLink>
                 ))}
 
-                {/* User-only links */}
                 {user && (
                   <>
                     <button
@@ -382,7 +422,6 @@ export default function Navbar() {
                   </>
                 )}
 
-                {/* Admin link */}
                 {isAdmin && (
                   <NavLink
                     to="/admin"
@@ -399,7 +438,7 @@ export default function Navbar() {
                 )}
               </nav>
 
-              {/* Bottom actions */}
+              {/* Bottom */}
               <div className="px-6 pb-8 pt-4 border-t border-gold/15 space-y-3">
                 {user ? (
                   <>

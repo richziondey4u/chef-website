@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 
 const AuthContext = createContext(null);
@@ -7,8 +7,13 @@ export function AuthProvider({ children }) {
   const [user, setUser]       = useState(undefined);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const fetchingRef           = useRef(false); // prevent duplicate fetches
 
   const fetchProfile = useCallback(async (userId) => {
+    // Prevent concurrent fetches
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
     try {
       const { data, error } = await supabase
         .from('profiles')
@@ -25,12 +30,15 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.warn('Profile fetch exception:', err);
       setProfile(null);
+    } finally {
+      fetchingRef.current = false;
     }
   }, []);
 
   useEffect(() => {
     let mounted = true;
 
+    // Get initial session
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!mounted) return;
       if (session?.user) {
@@ -40,9 +48,10 @@ export function AuthProvider({ children }) {
         setUser(null);
         setProfile(null);
       }
-      setLoading(false);
+      if (mounted) setLoading(false);
     });
 
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
@@ -50,17 +59,24 @@ export function AuthProvider({ children }) {
         if (event === 'SIGNED_IN' && session?.user) {
           setUser(session.user);
           await fetchProfile(session.user.id);
-          setLoading(false);
+          if (mounted) setLoading(false);
         }
 
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setProfile(null);
-          setLoading(false);
+          if (mounted) setLoading(false);
         }
 
         if (event === 'TOKEN_REFRESHED' && session?.user) {
           setUser(session.user);
+          // Re-fetch profile on token refresh to catch role changes
+          await fetchProfile(session.user.id);
+        }
+
+        if (event === 'USER_UPDATED' && session?.user) {
+          setUser(session.user);
+          await fetchProfile(session.user.id);
         }
       }
     );
@@ -71,7 +87,7 @@ export function AuthProvider({ children }) {
     };
   }, [fetchProfile]);
 
-  // ── updateProfile — was missing, Profile.jsx needs this ──
+  // Update profile fields and refresh context
   const updateProfile = useCallback(async (updates) => {
     if (!user) return { error: new Error('Not logged in') };
     try {
@@ -101,12 +117,13 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signOut = async () => {
+    setLoading(false);
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
-    setLoading(false);
   };
 
+  // Recompute every render — always fresh
   const isAdmin      = profile?.role === 'admin' || profile?.role === 'superadmin';
   const isSuperAdmin = profile?.role === 'superadmin';
 
