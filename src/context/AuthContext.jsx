@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(undefined); // undefined = not checked yet
+  const [user, setUser]       = useState(undefined);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -31,10 +31,8 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true;
 
-    // Get initial session once
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!mounted) return;
-
       if (session?.user) {
         setUser(session.user);
         await fetchProfile(session.user.id);
@@ -42,11 +40,9 @@ export function AuthProvider({ children }) {
         setUser(null);
         setProfile(null);
       }
-
-      setLoading(false); // ← always fires after getSession
+      setLoading(false);
     });
 
-    // Listen for auth changes AFTER initial load
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (!mounted) return;
@@ -75,6 +71,24 @@ export function AuthProvider({ children }) {
     };
   }, [fetchProfile]);
 
+  // ── updateProfile — was missing, Profile.jsx needs this ──
+  const updateProfile = useCallback(async (updates) => {
+    if (!user) return { error: new Error('Not logged in') };
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id)
+        .select()
+        .single();
+
+      if (!error && data) setProfile(data);
+      return { data, error };
+    } catch (err) {
+      return { error: err };
+    }
+  }, [user]);
+
   const updateLastSeen = useCallback(async (userId) => {
     try {
       await supabase
@@ -87,10 +101,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signOut = async () => {
-    setLoading(false);
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setLoading(false);
   };
 
   const isAdmin      = profile?.role === 'admin' || profile?.role === 'superadmin';
@@ -105,6 +119,7 @@ export function AuthProvider({ children }) {
       isSuperAdmin,
       signOut,
       fetchProfile,
+      updateProfile,
       updateLastSeen,
     }}>
       {children}
